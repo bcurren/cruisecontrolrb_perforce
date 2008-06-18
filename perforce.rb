@@ -5,94 +5,125 @@ require 'builder_error'
 class Perforce
   include CommandLine
 
-  attr_accessor :port, :client_spec, :username, :password, :path
+  attr_accessor :port, :client_spec, :username, :password, :path, :p4path
 
-	MAX_CHANGELISTS_TO_FETCH = 25
-	
+  MAX_CHANGELISTS_TO_FETCH = 25
+  
   def initialize(options = {})
-    @port, @clientspec, @username, @password, @path, @interactive = 
+    @port, @clientspec, @username, @password, @path, @p4path, @interactive = 
           options.delete(:port), options.delete(:clientspec), 
-					options.delete(:user), options.delete(:password), 
-					options.delete(:path), options.delete(:interactive)
+          options.delete(:user), options.delete(:password), 
+          options.delete(:path), options.delete(:p4path),
+          options.delete(:interactive)
     raise "don't know how to handle '#{options.keys.first}'" if options.length > 0
     @clientspec or raise 'P4 Clientspec not specified'
     @port or raise 'P4 Port not specified'
     @username or raise 'P4 username not specified'
     @password or raise 'P4 password not specified'
-    @path or raise 'P4 depot path not specified'
+    @p4path or raise 'P4 depot path not specified'
   end
 
-  def checkout(target_directory, revision = nil)
-		# No need for target_directory with Perforce, since this is controlled by
-		# the clientspec.
-
-		options = ""
-    options << "#{@path}##{revision_number(revision)}" unless revision.nil?
+  def checkout(revision = nil, stdout = $stdout)
+    options = ""
+    options << "#{@p4path}@#{revision_number(revision)}" unless revision.nil?
 
     # need to read from command output, because otherwise tests break
-    p4(:sync, options).each {|line| puts line.to_s }
-  end
-
-  def latest_revision(project)
-		# Get the latest changelist for this project
-		change = p4(:changes, "-m 1 #{@path}").first
-		
-		# TODO: This isn't right - changesets I believe is supposed to be the set
-		# of files that were changed as part of this changelist.
-		changesets = [ ChangesetEntry.new(change['status'], change['desc']) ]
-		Revision.new(change['change'].to_i, change['user'], Time.at(change['time'].to_i), change['desc'], changesets)
-  end
-
-  def revisions_since(project, revision_number)
-		# This should get all changelists since the last one we used, but when using
-		# the -R flag with P4 it only seems to get the latest one.
-		changelists = p4(:changes, "-m #{MAX_CHANGELISTS_TO_FETCH} #{@path}@#{revision_number},#head")
-		
-		changes = Array.new
-		changelists.each do |cl| 
-			changeset = [ ChangesetEntry.new(cl['status'], cl['desc']) ]
-			changes << Revision.new(cl['change'].to_i, cl['user'], Time.at(cl['time'].to_i), cl['desc'], changeset)
-		end
-    changes.delete_if { |r| r.number == revision_number }
-
-		changes
-  end
-
-  SYNC_PATTERN = /^(\/\/.+#\d+) - (\w+) .+$/
-  def update(project, revision = nil)
-		sync_output = p4(:sync, revision.nil? ? "" : "#{@path}@#{revision_number(revision)}")
-		synced_files = Array.new
-		
-		sync_output.each do |line|
-      match = SYNC_PATTERN.match(line['data'])
-      if match
-        file, operation = match[1..2]
-        synced_files << ChangesetEntry.new(operation, file)
-      end
-    end.compact
-
-		synced_files
+    p4(:sync, options).each {|line| stdout.puts line.to_s }
   end
   
-  private
+  def clean_checkout(revision = nil, stdout = $stdout)
+    FileUtils.rm_rf(path)
+    checkout(revision, stdout)
+  end
+
+  def latest_revision
+    build_revision_from(p4(:changes, "-m 1 #{@p4path}").first)
+  end
   
-	# Execute a P4 command, and return an array of the resulting output lines
-	# The array will contain a hash for each line out output
+  def last_locally_known_revision
+    return Revision.new(0) unless File.exist?(path)
+    Revision.new(info.revision)
+  end
+  
+  def up_to_date?(reasons = [], revision_number = last_locally_known_revision.number)
+    result = true
+    
+    latest_revision = self.latest_revision()
+    if latest_revision > Revision.new(revision_number)
+      reasons << "New revision #{latest_revision.number} detected"
+      reasons << revisions_since(revision_number)
+      result = false
+    end
+    
+    return result
+  end
+  
+  # SYNC_PATTERN = /^(\/\/.+#\d+) - (\w+) .+$/
+  def update(revision = nil)
+    checkout(revision)
+  #   sync_output = p4(:sync, revision.nil? ? "" : "#{@path}@#{revision_number(revision)}")
+  #   synced_files = Array.new
+  #   
+  #   sync_output.each do |line|
+  #   match = SYNC_PATTERN.match(line['data'])
+  #   if match
+  #     file, operation = match[1..2]
+  #     synced_files << ChangesetEntry.new(operation, file)
+  #   end
+  # end.compact
+  # 
+  #   synced_files
+  end
+  
+private
+  
+  # Execute a P4 command, and return an array of the resulting output lines
+  # The array will contain a hash for each line out output
   def p4(operation, options = nil)
-		p4cmd = "p4 -R -p #{@port} -c #{@clientspec} -u #{@username} -P #{@password} "
-		p4cmd << "#{operation.to_s}"
-		p4cmd << " " << options if options
-		
-		p4_output = Array.new
-		IO.popen(p4cmd, "rb") do |file|
-		  while not file.eof
-		    p4_output << Marshal.load(file)
-		  end
-		end
-		
-		p4_output
+    p4cmd = "p4 -R -p #{@port} -c #{@clientspec} -u #{@username} -P #{@password} "
+    p4cmd << "#{operation.to_s}"
+    p4cmd << " " << options if options
+    
+    p4_output = Array.new
+    # puts p4cmd
+    IO.popen(p4cmd, "rb") do |file|
+      while not file.eof
+        p4_output << Marshal.load(file)
+      end
+    end
+    
+    p4_output
   end
-
+  
+  def info
+    change1 = p4(:changes, "-m 1 #{@p4path}#have").first
+    change2 = p4(:changes, "-m 1 #{@p4path}#head").first
+    Perforce::Info.new(change1['change'].to_i, change2['change'].to_i, change2['user'])
+  end
+  
+  def build_revision_from(change)
+    return nil unless change
+    
+    changeset = change['change'].to_i
+    
+    # Build the array of changes
+    changed_files = p4(:describe, "-s #{changeset}").first
+    i = 0
+    changesets = []
+    while (changed_files["action#{i}"])
+      changesets << ChangesetEntry.new(changed_files["action#{i}"], changed_files["depotFile#{i}"])
+      i = i + 1
+    end
+    
+    Revision.new(changeset, change['user'], Time.at(change['time'].to_i), change['desc'], changesets)
+  end
+  
+  def revisions_since(revision_number)
+    p4(:changes, "-m #{MAX_CHANGELISTS_TO_FETCH} #{@p4path}@#{revision_number},#head").collect do |change|
+      build_revision_from(change)
+    end
+  end
+  
   def revision_number(revision)
     revision.respond_to?(:number) ? revision.number : revision.to_i
   end
