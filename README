@@ -1,18 +1,11 @@
-While I haven't had a chance to clean up the code, folks have asked for it, 
-so I'm making my Perforce implementation for CruiseControl available. 
+Licensed under the MIT license.
+
+* This code has been tested on CruiseControl.rb 1.3.
+
 There are some important notes:
-
 * You need to set up your project manually, you can't do an "add" via CruiseControl.
-* Some work needs to be done on the text retrieval for checkin messages, and how 
-that's displayed on the CC.rb results pages.
-* I haven't used this since August 2007, so cannot vouch for whether it works with
-current versions of Cruisecontrol.rb.
 
-Licensed under the MIT license.  I have not yet submitted it to the CC.rb folks, 
-as I hadn't had time to clean it up yet. So, if you dial it in better, please do 
-submit it to them, or send me a pull request, and I'll submit it, etc.
-
-To install/use it, ut the perforce.rb file into your cruisecontrol/app/models directory.
+To install/use it, put the perforce.rb file into your cruisecontrol/app/models directory.
 
 Manually setup your project:
 * Create a directory under the cruisecontrol/projects directory.
