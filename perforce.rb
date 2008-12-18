@@ -80,7 +80,7 @@ private
   # Execute a P4 command, and return an array of the resulting output lines
   # The array will contain a hash for each line out output
   def p4(operation, options = nil)
-    p4cmd = "p4 -R -p #{@port} -c #{@clientspec} -u #{@username} -P #{@password} "
+    p4cmd = "p4 -R -p #{@port} -c #{@clientspec} -u #{@username} " + password_args
     p4cmd << "#{operation.to_s}"
     p4cmd << " " << options if options
     
@@ -93,6 +93,10 @@ private
     end
     
     p4_output
+  end
+  
+  def password_args
+    (@password.blank?) ? "" : "-P #{@password} "
   end
   
   def info
