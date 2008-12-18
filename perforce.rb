@@ -1,7 +1,6 @@
 require 'builder_error'
 
 # Perforce source control implementation for CruiseControl.rb
-# Written by Christopher Bailey, mailto:chris@cobaltedge.com
 class Perforce
   include CommandLine
 
